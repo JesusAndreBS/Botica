@@ -1,0 +1,1 @@
+export { alertsRoutes } from './alerts.routes.js';

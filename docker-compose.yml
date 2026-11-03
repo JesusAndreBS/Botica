@@ -1,0 +1,125 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nova-postgres
+    environment:
+      POSTGRES_DB: nova_salud
+      POSTGRES_USER: nova_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nova_user -d nova_salud"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nova-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  redis:
+    image: redis:7-alpine
+    container_name: nova-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - nova-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: nova-backend
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://nova_user:${DB_PASSWORD}@postgres:5432/nova_salud?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGIN: https://${DOMAIN}
+      PORT: 3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./backend/uploads:/app/uploads
+    networks:
+      - nova-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: nova-frontend
+    environment:
+      VITE_API_URL: https://${DOMAIN}/api
+      VITE_WS_URL: wss://${DOMAIN}/ws
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./frontend/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - nova-network
+
+  stock-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    container_name: nova-stock-worker
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://nova_user:${DB_PASSWORD}@postgres:5432/nova_salud?schema=public
+      REDIS_URL: redis://redis:6379
+      ALERT_THRESHOLD_DAYS: 30
+      CHECK_INTERVAL_MINUTES: 15
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - nova-network
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  nova-network:
+    driver: bridge

@@ -1,0 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+body { @apply bg-gray-50 text-gray-900 antialiased; }
+input, button, select, textarea { @apply text-base; }

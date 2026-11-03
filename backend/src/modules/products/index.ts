@@ -1,0 +1,1 @@
+export { productsRoutes } from './products.routes.js';
